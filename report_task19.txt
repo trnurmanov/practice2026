@@ -1,0 +1,8 @@
+Отчёт по задаче 19: Длительные операции
+Дата: 7/18/2026 3:41:49 PM
+
+1. TestCommand реализует ICommand как в задании
+2. RepeatCommand оборачивает TestCommand в ILongCommand для 3 вызовов
+3. 5 экземпляров TestCommand выполнены по 3 раза через RoundRobinScheduler
+4. Поток остановлен командой HardStop
+5. Производительность Round Robin сопоставима с последовательным выполнением
