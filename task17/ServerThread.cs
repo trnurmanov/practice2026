@@ -6,15 +6,16 @@ namespace task17
 {
     public class ServerThread
     {
-        private readonly BlockingCollection<ICommand> _commandBuffer = new BlockingCollection<ICommand>();
+        private readonly IScheduler _scheduler;
         private readonly Thread _executionThread;
         private Action _processingStrategy;
         private volatile bool _terminationRequested = false;
 
         public Thread Thread => _executionThread;
 
-        public ServerThread()
+        public ServerThread(IScheduler scheduler)
         {
+            _scheduler = scheduler ?? throw new ArgumentNullException(nameof(scheduler));
             _processingStrategy = DefaultBehavior;
             _executionThread = new Thread(Run);
         }
@@ -31,30 +32,26 @@ namespace task17
 
         public void Add(ICommand cmd)
         {
-            try
-            {
-                _commandBuffer.Add(cmd);
-            }
-            catch (InvalidOperationException)
-            {
-            }
+            _scheduler.Add(cmd);
         }
 
         public void HardStop()
         {
             _terminationRequested = true;
-            _commandBuffer.CompleteAdding();
         }
 
         public void SoftStop()
         {
-            _commandBuffer.CompleteAdding();
             UpdateBehavior(() =>
             {
-                if (_commandBuffer.TryTake(out ICommand cmd))
+                if (_scheduler.HasCommand())
                 {
-                    ExecuteCommand(cmd);
-                    return;
+                    var cmd = _scheduler.Select();
+                    if (cmd != null)
+                    {
+                        ExecuteCommand(cmd);
+                        return;
+                    }
                 }
                 HardStop();
             });
@@ -75,16 +72,17 @@ namespace task17
 
         private void DefaultBehavior()
         {
-            try
+            if (_scheduler.HasCommand())
             {
-                if (_commandBuffer.TryTake(out ICommand cmd, 100))
+                var cmd = _scheduler.Select();
+                if (cmd != null)
                 {
                     ExecuteCommand(cmd);
                 }
             }
-            catch (InvalidOperationException)
+            else
             {
-                HardStop();
+                Thread.Sleep(1);
             }
         }
 
@@ -97,6 +95,13 @@ namespace task17
             catch (Exception ex)
             {
                 ExceptionHandler.Handle(cmd, ex);
+            }
+            finally
+            {
+                if (cmd is ILongCommand longCmd)
+                {
+                    (_scheduler as RoundRobinScheduler)?.Reschedule(longCmd);
+                }
             }
         }
     }

@@ -1,90 +1,99 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Threading;
 using Xunit;
 using task17;
 
 namespace task17tests
 {
-    public class ServerThreadTests : IDisposable
+    public class SchedulerTests : IDisposable
     {
-        private readonly ServerThread _executor;
+        private RoundRobinScheduler _planner;
+        private ServerThread _worker;
 
-        public ServerThreadTests()
+        public SchedulerTests()
         {
-            _executor = new ServerThread();
+            _planner = new RoundRobinScheduler();
+            _worker = new ServerThread(_planner);
             ExceptionHandler.Clear();
         }
 
         public void Dispose()
         {
-            _executor.HardStop();
-            _executor.Join();
+            _worker.HardStop();
+            _worker.Join();
         }
 
         [Fact]
-        public void ForceStop_TerminatesExecution_AndClearsPendingWork()
+        public void LongOperation_ExecutesMultipleTimes_UntilCompleted()
         {
-            var wasExecuted = false;
-            var operation = new ActionCommand(() => wasExecuted = true);
+            var executionLog = new List<int>();
+            var longOp = new StepOperation(3, () => executionLog.Add(1));
 
-            _executor.Start();
-            _executor.Add(operation);
-            Thread.Sleep(200);
+            _planner.Add(longOp);
+            _worker.Start();
 
-            _executor.HardStop();
-            _executor.Join();
+            while (!longOp.IsCompleted)
+                Thread.Sleep(10);
 
-            Assert.True(wasExecuted);
-            Assert.False(_executor.Thread.IsAlive);
+            Thread.Sleep(100);
+            _worker.HardStop();
+            _worker.Join();
+
+            Assert.Equal(3, executionLog.Count);
         }
 
         [Fact]
-        public void GracefulStop_FinishesAllQueuedWork_ThenShutsDown()
+        public void RoundRobin_AlternatesBetweenMultipleLongOperations()
         {
-            var completedOperations = 0;
-            var operations = new[]
-            {
-                new ActionCommand(() => Interlocked.Increment(ref completedOperations)),
-                new ActionCommand(() => Interlocked.Increment(ref completedOperations)),
-                new ActionCommand(() => Interlocked.Increment(ref completedOperations))
-            };
+            var log = new List<string>();
+            var opA = new StepOperation(3, () => log.Add("A"));
+            var opB = new StepOperation(3, () => log.Add("B"));
+            var opC = new StepOperation(3, () => log.Add("C"));
 
-            _executor.Start();
-            foreach (var op in operations)
-            {
-                _executor.Add(op);
-            }
+            _planner.Add(opA);
+            _planner.Add(opB);
+            _planner.Add(opC);
+            _worker.Start();
 
-            _executor.SoftStop();
-            _executor.Join();
+            while (!opA.IsCompleted || !opB.IsCompleted || !opC.IsCompleted)
+                Thread.Sleep(10);
 
-            Assert.Equal(3, completedOperations);
-            Assert.False(_executor.Thread.IsAlive);
+            Thread.Sleep(100);
+            _worker.HardStop();
+            _worker.Join();
+
+            Assert.Equal(3, log.FindAll(x => x == "A").Count);
+            Assert.Equal(3, log.FindAll(x => x == "B").Count);
+            Assert.Equal(3, log.FindAll(x => x == "C").Count);
+
+            Assert.Equal("A", log[0]);
+            Assert.Equal("B", log[1]);
+            Assert.Equal("C", log[2]);
         }
 
-        [Fact]
-        public void StopCommands_MustFail_WhenCalledFromOutsideWorkerThread()
+
+        private class StepOperation : ILongCommand
         {
-            _executor.Start();
-            var forceStopCmd = new HardStopCommand(_executor);
-            var gracefulStopCmd = new SoftStopCommand(_executor);
+            private readonly int _maxSteps;
+            private readonly Action _action;
+            private int _currentStep;
 
-            Assert.Throws<InvalidOperationException>(() => forceStopCmd.Execute());
-            Assert.Throws<InvalidOperationException>(() => gracefulStopCmd.Execute());
-        }
+            public bool IsCompleted => _currentStep >= _maxSteps;
 
-        private class ActionCommand : ICommand
-        {
-            private readonly Action _callback;
-
-            public ActionCommand(Action callback)
+            public StepOperation(int maxSteps, Action action)
             {
-                _callback = callback;
+                _maxSteps = maxSteps;
+                _action = action;
             }
 
             public void Execute()
             {
-                _callback?.Invoke();
+                if (!IsCompleted)
+                {
+                    _action?.Invoke();
+                    _currentStep++;
+                }
             }
         }
     }
