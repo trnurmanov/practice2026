@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Threading;
 
 namespace task14
 {
@@ -11,7 +10,6 @@ namespace task14
                 throw new ArgumentException("Количество потоков должно быть положительным", nameof(threadNumber));
 
             double integralResult = 0.0;
-            int runningThreads = threadNumber;
             double chunkSize = (upperLimit - lowerLimit) / threadNumber;
             Thread[] computationThreads = new Thread[threadNumber];
             double[] chunkResults = new double[threadNumber];
@@ -42,6 +40,29 @@ namespace task14
                 integralResult += chunkValue;
 
             return integralResult;
+        }
+
+        public static double SolveSingleThread(double lowerLimit, double upperLimit, Func<double, double> integrand, double precision)
+        {
+            double integrationRange = upperLimit - lowerLimit;
+
+            if (integrationRange <= 0)
+                return 0.0;
+
+            int partitionPoints = Math.Max(1, (int)Math.Ceiling(integrationRange / precision));
+            double refinedStep = integrationRange / partitionPoints;
+
+            double trapezoidalSum = 0.0;
+            for (int j = 0; j < partitionPoints; j++)
+            {
+                double leftNode = lowerLimit + j * refinedStep;
+                double rightNode = leftNode + refinedStep;
+                double leftFunctionValue = integrand(leftNode);
+                double rightFunctionValue = integrand(rightNode);
+                trapezoidalSum += (leftFunctionValue + rightFunctionValue) / 2.0 * refinedStep;
+            }
+
+            return trapezoidalSum;
         }
 
         private static double IntegrateByTrapezoidalRule(double intervalStart, double intervalEnd, Func<double, double> integrand, double gridStep)
